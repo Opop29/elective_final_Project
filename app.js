@@ -1,3 +1,4 @@
+
 function navigateTo(page) {
    
     const contentSections = document.querySelectorAll('section');
@@ -10,7 +11,6 @@ function navigateTo(page) {
     const selectedSection = document.getElementById(page);
     selectedSection.style.display = 'block';
 }
-
 
 navigateTo('home');
 
