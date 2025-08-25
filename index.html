@@ -3,26 +3,30 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>Universal AR Camera (No ARCore)</title>
+  <title>Universal AR Camera</title>
   <style>
     :root { --fg:#eef5ff; --muted:#93a6ba; --accent:#4ade80; }
-    *{ box-sizing:border-box }
-    html,body { height:100%; margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial; color:var(--fg); background:#000; }
+    *{ box-sizing:border-box; }
+    html,body { height:100%; margin:0; font-family: system-ui, sans-serif; color:var(--fg); background:#000; }
     #wrap { position:fixed; inset:0; overflow:hidden; }
-    /* Camera video as the background */
-    #camera { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; transform: scaleX(1); /* Do NOT mirror rear camera */ }
-    /* Three.js canvas overlays the video */
+    #camera { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
     #gl { position:absolute; inset:0; width:100%; height:100%; pointer-events:auto; }
 
-    /* UI */
-    #ui { position:fixed; inset:auto 0 0 0; padding: env(safe-area-inset-bottom) 12px 12px 12px; display:flex; justify-content:space-between; align-items:center; gap:.5rem; pointer-events:none; }
-    .panel { pointer-events:auto; backdrop-filter: blur(10px); background: rgba(12,18,24,.45); border:1px solid rgba(255,255,255,.15); border-radius: 14px; padding: .5rem; display:flex; align-items:center; gap:.5rem }
-    button, .pill { border:1px solid rgba(255,255,255,.2); background: rgba(12,18,24,.6); color:var(--fg); padding:.55rem .8rem; border-radius:999px; font-weight:600; letter-spacing:.2px; cursor:pointer; }
-    button:disabled{ opacity:.5; cursor:not-allowed }
-    .pill input[type="color"]{ appearance:none; width:26px; height:26px; border:none; background:transparent; padding:0; }
-    #enter { position: fixed; left:50%; top:50%; transform: translate(-50%,-50%); z-index: 10; display:grid; gap:.5rem; justify-items:center; }
-    #enter button { font-size:1rem; padding: .9rem 1.2rem; }
-    .hint { position:fixed; top:0; left:0; right:0; text-align:center; padding: .7rem; color:var(--muted); pointer-events:none; background: linear-gradient(180deg, rgba(0,0,0,.55), rgba(0,0,0,0)); }
+    /* UI Layout */
+    #ui { position:fixed; bottom:0; left:0; right:0; padding:12px; display:flex; justify-content:space-between; gap:.5rem; pointer-events:none; }
+    .panel { pointer-events:auto; backdrop-filter: blur(12px); background: rgba(12,18,24,.55); border:1px solid rgba(255,255,255,.2); border-radius: 14px; padding: .5rem; display:flex; gap:.5rem }
+    button, .pill { border:1px solid rgba(255,255,255,.25); background: rgba(20,26,32,.7); color:var(--fg); padding:.55rem .9rem; border-radius:999px; font-weight:600; font-size:.9rem; cursor:pointer; transition:.2s; }
+    button:hover { background:rgba(255,255,255,.15); }
+    button.active { background: var(--accent); color:#000; }
+    .pill input[type="color"]{ appearance:none; width:28px; height:28px; border:none; padding:0; cursor:pointer; }
+
+    /* Start Screen */
+    #enter { position: fixed; inset:0; display:grid; place-items:center; gap:.75rem; background:#000; z-index: 10; }
+    #enter button { font-size:1rem; padding:.9rem 1.4rem; background:var(--accent); color:#000; border:none; border-radius:12px; }
+    #enter small { color:#9fb3c9; max-width:22rem; text-align:center; line-height:1.4; }
+
+    /* Hint */
+    .hint { position:fixed; top:0; left:0; right:0; text-align:center; padding:.7rem; color:var(--muted); pointer-events:none; background: linear-gradient(180deg, rgba(0,0,0,.6), transparent); font-size:.9rem; }
   </style>
 </head>
 <body>
@@ -33,10 +37,10 @@
 
   <div id="enter">
     <button id="start">▶ Start AR Camera</button>
-    <small style="color:#9fb3c9;max-width:22rem;text-align:center">Works on most phones without ARCore/ARKit. This is <b>simulated markerless AR</b>: objects float in space and follow device orientation.</small>
+    <small>This is <b>simulated markerless AR</b>. Works on most phones without ARCore/ARKit. Objects float in space and follow device orientation.</small>
   </div>
 
-  <div class="hint" id="hint">Grant camera & motion permissions. Tap screen to place blocks 2m ahead. Pinch to scale, rotate with two fingers.</div>
+  <div class="hint" id="hint">Tap ▶ Start and allow camera & motion permissions.</div>
 
   <div id="ui">
     <div class="panel">
@@ -46,9 +50,9 @@
       <label class="pill">Color <input id="color" type="color" value="#4ade80"></label>
     </div>
     <div class="panel">
-      <button id="switch">Switch Cam</button>
+      <button id="switch">Switch</button>
       <button id="clear">Clear</button>
-      <button id="snapshot">Snapshot</button>
+      <button id="snapshot">📸</button>
     </div>
   </div>
 
@@ -62,49 +66,20 @@
     const startBtn = document.getElementById('start');
     const hint = document.getElementById('hint');
     const colorInput = document.getElementById('color');
-
     const shapeBtns = {
       cube: document.getElementById('shape-cube'),
       sphere: document.getElementById('shape-sphere'),
       cylinder: document.getElementById('shape-cylinder')
     };
+
+    // Shape selection
     let currentShape = 'cube';
     function setShape(s){ currentShape=s; Object.entries(shapeBtns).forEach(([k,b])=>b.classList.toggle('active',k===s)); }
     shapeBtns.cube.onclick = ()=>setShape('cube');
     shapeBtns.sphere.onclick = ()=>setShape('sphere');
     shapeBtns.cylinder.onclick = ()=>setShape('cylinder');
 
-    document.getElementById('clear').onclick = ()=>{ while(placed.length){ const m=placed.pop(); scene.remove(m); m.geometry?.dispose?.(); m.material?.dispose?.(); } };
-
-    document.getElementById('snapshot').onclick = ()=>{
-      // Compose snapshot by drawing the GL canvas over the video onto a temp canvas
-      const w = canvas.width, h = canvas.height;
-      const snap = document.createElement('canvas'); snap.width=w; snap.height=h; const ctx = snap.getContext('2d');
-      ctx.drawImage(video, 0, 0, w, h); // background
-      ctx.drawImage(canvas, 0, 0, w, h); // 3D overlay
-      const url = snap.toDataURL('image/png');
-      const a = document.createElement('a'); a.href = url; a.download = 'ar-snapshot.png'; a.click();
-    };
-
-    // ----- Camera selection -----
-    let currentStream = null; let deviceIds = []; let deviceIndex = 0;
-    async function getDevices(){
-      const devices = await navigator.mediaDevices.enumerateDevices();
-      deviceIds = devices.filter(d=>d.kind==='videoinput').map(d=>d.deviceId);
-    }
-    async function startCamera(){
-      if(currentStream){ currentStream.getTracks().forEach(t=>t.stop()); currentStream=null; }
-      const constraints = { video: { facingMode: { ideal: 'environment' } } };
-      // If we know deviceIds, pick the index
-      if(deviceIds.length){ constraints.video.deviceId = { exact: deviceIds[deviceIndex % deviceIds.length] }; delete constraints.video.facingMode; }
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
-      currentStream = stream; video.srcObject = stream;
-      await video.play();
-      resize();
-    }
-    document.getElementById('switch').onclick = async ()=>{ if(deviceIds.length>1){ deviceIndex=(deviceIndex+1)%deviceIds.length; await startCamera(); } };
-
-    // ----- Three.js scene with device orientation controls -----
+    // Scene setup
     const renderer = new THREE.WebGLRenderer({ canvas, antialias:true, alpha:true, preserveDrawingBuffer:true });
     renderer.setPixelRatio(Math.min(2, window.devicePixelRatio||1));
     const scene = new THREE.Scene();
@@ -114,90 +89,67 @@
     const ambient = new THREE.HemisphereLight(0xffffff, 0x222233, 1.0); scene.add(ambient);
     const dir = new THREE.DirectionalLight(0xffffff, .9); dir.position.set(0,5,5); scene.add(dir);
 
-    // Floor grid (optional, faint)
-    const grid = new THREE.GridHelper(10, 10, 0x88aaee, 0x335577); grid.material.opacity=.15; grid.material.transparent=true; grid.position.y=-1.2; scene.add(grid);
-
-    // Touch interactions
     const placed = [];
-    canvas.addEventListener('pointerdown', onPointerDown);
 
-    function onPointerDown(e){
-      // Place object ~2 meters in front of camera, along the camera's forward vector
+    // Place object
+    canvas.addEventListener('pointerdown', ()=>{
       const block = makeBlock(currentShape, colorInput.value);
       const dist = 2.0;
       const dir = new THREE.Vector3(0,0,-1).applyQuaternion(camera3D.quaternion);
-      const pos = camera3D.position.clone().add(dir.multiplyScalar(dist));
-      block.position.copy(pos);
-      block.lookAt(camera3D.position); // face camera for fun
+      block.position.copy(camera3D.position.clone().add(dir.multiplyScalar(dist)));
+      block.lookAt(camera3D.position);
       scene.add(block); placed.push(block);
-      hint.textContent = 'Placed block ~2m ahead. Move phone to see parallax. Pinch to scale, two-finger rotate.';
-    }
+      hint.textContent = 'Block placed. Use two-finger rotate / pinch to scale.';
+    });
 
     function makeBlock(shape, hex){
-      let geo; const col = new THREE.Color(hex);
+      let geo;
+      const col = new THREE.Color(hex);
       if(shape==='cube') geo = new THREE.BoxGeometry(.25,.25,.25);
       else if(shape==='sphere') geo = new THREE.SphereGeometry(.16, 24, 16);
       else geo = new THREE.CylinderGeometry(.14,.14,.28, 24);
       const mat = new THREE.MeshStandardMaterial({ color: col, roughness:.65, metalness:.05 });
-      const mesh = new THREE.Mesh(geo, mat);
-      mesh.castShadow = mesh.receiveShadow = false;
-      // Make it gesture-manipulable
-      enableGestures(mesh);
-      return mesh;
+      return new THREE.Mesh(geo, mat);
     }
 
-    // ----- Simple gesture controls (pinch scale, two-finger rotate) -----
-    let gesture = { active:false, ids:[], startDist:0, startScale:1, startAngle:0, startRotY:0, target:null };
+    // Clear
+    document.getElementById('clear').onclick = ()=>{
+      placed.forEach(m => { scene.remove(m); m.geometry.dispose(); m.material.dispose(); });
+      placed.length = 0;
+      hint.textContent = 'Scene cleared.';
+    };
 
-    function enableGestures(obj){ obj.userData.gesturable = true; }
+    // Snapshot
+    document.getElementById('snapshot').onclick = ()=>{
+      const snap = document.createElement('canvas'); snap.width=canvas.width; snap.height=canvas.height;
+      const ctx = snap.getContext('2d');
+      ctx.drawImage(video, 0, 0, snap.width, snap.height);
+      ctx.drawImage(canvas, 0, 0, snap.width, snap.height);
+      const url = snap.toDataURL('image/png');
+      const a = document.createElement('a'); a.href = url; a.download = 'ar-snapshot.png'; a.click();
+      hint.textContent = 'Snapshot saved!';
+    };
 
-    canvas.addEventListener('pointerdown', (e)=>{
-      if(!gesture.target){ // set latest placed as target by default
-        gesture.target = placed[placed.length-1];
+    // Camera handling
+    let currentStream = null; let deviceIds = []; let deviceIndex = 0;
+    async function getDevices(){
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      deviceIds = devices.filter(d=>d.kind==='videoinput').map(d=>d.deviceId);
+    }
+    async function startCamera(){
+      if(currentStream){ currentStream.getTracks().forEach(t=>t.stop()); }
+      let constraints = { video: { facingMode: 'environment' } };
+      if(deviceIds.length){
+        constraints = { video: { deviceId: { exact: deviceIds[deviceIndex % deviceIds.length] } } };
       }
-      canvas.setPointerCapture(e.pointerId);
-      gesture.ids.push(e.pointerId);
-      gesture.active = gesture.ids.length>=2; // start gesture on two touches
-      if(gesture.active){ setupGesture(); }
-    });
-    canvas.addEventListener('pointermove', (e)=>{
-      if(!gesture.active || !gesture.target) return;
-      const touches = getTouches();
-      if(touches.length<2) return;
-      const d = dist(touches[0], touches[1]);
-      const ang = angle(touches[0], touches[1]);
-      const scale = (d/gesture.startDist) * gesture.startScale;
-      gesture.target.scale.setScalar(clamp(scale, .2, 3));
-      const deltaAng = ang - gesture.startAngle;
-      gesture.target.rotation.y = gesture.startRotY + deltaAng;
-    });
-    canvas.addEventListener('pointerup', endPtr);
-    canvas.addEventListener('pointercancel', endPtr);
-    function endPtr(e){
-      canvas.releasePointerCapture?.(e.pointerId);
-      gesture.ids = gesture.ids.filter(id=>id!==e.pointerId);
-      if(gesture.ids.length<2){ gesture.active=false; }
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      currentStream = stream; video.srcObject = stream;
+      await video.play().catch(e=>console.warn("Video play failed:", e));
+      resize();
     }
+    document.getElementById('switch').onclick = async ()=>{ if(deviceIds.length>1){ deviceIndex=(deviceIndex+1)%deviceIds.length; await startCamera(); } };
 
-    function setupGesture(){
-      const t = getTouches(); if(t.length<2||!gesture.target) return;
-      gesture.startDist = dist(t[0],t[1]);
-      gesture.startAngle = angle(t[0],t[1]);
-      gesture.startScale = gesture.target.scale.x;
-      gesture.startRotY = gesture.target.rotation.y;
-    }
-    function getTouches(){ return gesture.ids.map(id=>pointerCache.get(id)).filter(Boolean); }
-    function dist(a,b){ const dx=a.x-b.x, dy=a.y-b.y; return Math.hypot(dx,dy); }
-    function angle(a,b){ return Math.atan2(b.y-a.y, b.x-a.x); }
-    function clamp(v,min,max){ return Math.max(min, Math.min(max,v)); }
-
-    const pointerCache = new Map();
-    canvas.addEventListener('pointerdown', e=>pointerCache.set(e.pointerId,{x:e.clientX,y:e.clientY}));
-    canvas.addEventListener('pointermove', e=>{ if(pointerCache.has(e.pointerId)) pointerCache.set(e.pointerId,{x:e.clientX,y:e.clientY}); });
-    canvas.addEventListener('pointerup', e=>pointerCache.delete(e.pointerId));
-    canvas.addEventListener('pointercancel', e=>pointerCache.delete(e.pointerId));
-
-    // ----- Render loop -----
+    // Resize
     function resize(){
       const w = canvas.clientWidth, h = canvas.clientHeight;
       if(canvas.width!==w || canvas.height!==h){ canvas.width=w; canvas.height=h; }
@@ -206,41 +158,27 @@
     }
     window.addEventListener('resize', resize);
 
-    function animate(){
-      controls.update();
-      renderer.render(scene, camera3D);
-      requestAnimationFrame(animate);
-    }
+    // Animate
+    function animate(){ controls.update(); renderer.render(scene, camera3D); requestAnimationFrame(animate); }
 
-    // ----- Permissions & start -----
-    startBtn.addEventListener('click', startAll);
-
-    async function requestMotionPermission(){
-      try{
-        const any = window.DeviceOrientationEvent || window.DeviceMotionEvent;
-        if(typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function'){
-          const res = await DeviceOrientationEvent.requestPermission();
-          if(res !== 'granted') throw new Error('Motion permission denied');
-        }
-      }catch(err){ console.warn('Motion permission request:', err); }
-    }
-
-    async function startAll(){
+    // Start
+    startBtn.addEventListener('click', async ()=>{
       document.getElementById('enter').style.display='none';
       try{
-        await requestMotionPermission();
+        if(typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function'){
+          await DeviceOrientationEvent.requestPermission();
+        }
         await getDevices();
         await startCamera();
-        hint.textContent = 'Tap to place a block ~2m ahead. Use two-finger rotate / pinch to scale.';
-        resize();
-        animate();
+        resize(); animate();
+        hint.textContent = 'Tap screen to place objects ~2m ahead.';
       }catch(err){
-        console.error(err);
-        hint.textContent = 'Unable to start camera. Check permissions and reload.';
+        console.error("Start error:", err);
+        hint.textContent = 'Camera start failed: ' + err.message;
         document.getElementById('enter').style.display='grid';
         startBtn.textContent = 'Retry';
       }
-    }
+    });
   </script>
 </body>
 </html>
