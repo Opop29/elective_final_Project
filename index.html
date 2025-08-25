@@ -1,440 +1,106 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-<title>Smooth AR Camera — Drive the Car</title>
-<style>
-  :root{
-    --fg:#eaf6ff; --muted:#9db0c6; --accent:#50e3a4;
-  }
-  html,body{height:100%;margin:0;background:#000;color:var(--fg);font-family:system-ui,Segoe UI,Roboto,Arial;}
-  #wrap{position:fixed;inset:0;overflow:hidden}
-  /* Camera video */
-  #camera{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform:scaleX(1);background:#000}
-  /* three.js canvas overlay */
-  #gl{position:absolute;inset:0;width:100%;height:100%;pointer-events:auto}
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <title>AR Car Placement</title>
+  <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/ar.js@3.4.5/aframe/build/aframe-ar-nft.js"></script>
+  <style>
+    body, html {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      width: 100%;
+      height: 100%;
+      background: black;
+    }
 
-  /* Top hint */
-  .hint{position:fixed;left:0;right:0;top:12px;text-align:center;color:var(--muted);pointer-events:none;font-size:13px;text-shadow:0 1px 2px rgba(0,0,0,.6);}
+    #startBtn {
+      position: absolute;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 12px 25px;
+      font-size: 18px;
+      font-weight: bold;
+      background: #00b894;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      z-index: 5;
+      transition: 0.3s;
+    }
+    #startBtn:hover {
+      background: #019874;
+    }
 
-  /* center start */
-  #enter{position:fixed;inset:0;display:grid;place-items:center;gap:.7rem;z-index:30;background:linear-gradient(180deg,rgba(0,0,0,.6),transparent)}
-  #enter button{padding:12px 18px;border-radius:12px;border:none;background:var(--accent);color:#012; font-weight:700;font-size:16px}
-
-  /* bottom UI */
-  #ui{position:fixed;left:12px;right:12px;bottom:12px;display:flex;justify-content:space-between;gap:10px;z-index:25;pointer-events:none}
-  .panel{pointer-events:auto;backdrop-filter:blur(8px);background:rgba(6,10,14,.5);border-radius:12px;padding:8px;display:flex;gap:8px;align-items:center;border:1px solid rgba(255,255,255,.06)}
-  button, .pill{border:none;background:rgba(255,255,255,.06);color:var(--fg);padding:8px 12px;border-radius:10px;font-weight:700;cursor:pointer}
-  button:hover{transform:translateY(-2px);transition:transform .12s}
-  .small{font-size:13px;color:var(--muted);padding:6px 8px;border-radius:8px}
-  .controlsGrid{display:grid;grid-template-columns:repeat(3,64px);gap:8px}
-  .big{width:64px;height:48px;display:flex;align-items:center;justify-content:center;font-size:18px;border-radius:10px}
-  input[type=color]{width:34px;height:34px;border-radius:8px;border:0;padding:0}
-
-  /* snapshot preview */
-  #preview{position:fixed;inset:0;display:none;place-items:center;background:rgba(0,0,0,.85);z-index:40}
-  #preview img{max-width:92%;max-height:86%;border-radius:12px;box-shadow:0 12px 40px rgba(0,0,0,.6)}
-  #preview .row{margin-top:12px;display:flex;gap:8px}
-
-  /* small status */
-  #status{position:fixed;left:12px;top:12px;padding:8px 10px;border-radius:10px;background:rgba(0,0,0,.45);font-size:13px;color:var(--muted);z-index:26}
-
-  @media (min-width:700px){ .controlsGrid{grid-template-columns:repeat(3,80px)} .big{width:80px;height:54px} }
-</style>
+    /* Force landscape message */
+    #rotateMessage {
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      background: black;
+      color: white;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      font-size: 22px;
+      text-align: center;
+      z-index: 10;
+    }
+    @media (orientation: landscape) {
+      #rotateMessage { display: none; }
+    }
+  </style>
 </head>
 <body>
-  <div id="wrap">
-    <video id="camera" playsinline autoplay muted></video>
-    <canvas id="gl"></canvas>
-  </div>
+  <div id="rotateMessage">🔄 Please rotate your device to Landscape mode</div>
 
-  <div id="enter">
-    <button id="start">▶ Start AR Car</button>
-    <div style="color:var(--muted);max-width:76ch;text-align:center">Tap the screen to place the car ~2m ahead. Use the on-screen controls to drive — smooth acceleration & steering. Works without ARCore/ARKit.</div>
-  </div>
+  <button id="startBtn">Start Car</button>
 
-  <div class="hint" id="hint">Allow camera & motion. Tap to place car.</div>
-  <div id="status">Camera: <span id="camState">idle</span></div>
+  <a-scene
+    vr-mode-ui="enabled: false"
+    embedded
+    arjs="sourceType: webcam; debugUIEnabled: false;"
+    renderer="logarithmicDepthBuffer: true;"
+  >
+    <!-- Camera -->
+    <a-entity camera look-controls></a-entity>
 
-  <div id="ui">
-    <div class="panel">
-      <div style="display:flex;align-items:center;gap:8px">
-        <button id="switch">🔄</button>
-        <button id="snapshot">📸</button>
-        <button id="clear">🧹</button>
-        <label class="small">Color <input id="carColor" type="color" value="#ff6b6b"></label>
-      </div>
-    </div>
+    <!-- Car container (initially hidden) -->
+    <a-entity id="carContainer" visible="false" position="0 0 -2" rotation="0 0 0">
+      <!-- Replace with GLTF car model -->
+      <a-box color="red" depth="1" height="0.5" width="2"></a-box>
+      <a-cylinder color="black" radius="0.25" height="0.25" position="-0.8 -0.25 0.5"></a-cylinder>
+      <a-cylinder color="black" radius="0.25" height="0.25" position="0.8 -0.25 0.5"></a-cylinder>
+      <a-cylinder color="black" radius="0.25" height="0.25" position="-0.8 -0.25 -0.5"></a-cylinder>
+      <a-cylinder color="black" radius="0.25" height="0.25" position="0.8 -0.25 -0.5"></a-cylinder>
+    </a-entity>
+  </a-scene>
 
-    <div class="panel">
-      <!-- driving controls -->
-      <div style="display:flex;flex-direction:column;align-items:center;gap:8px">
-        <div class="controlsGrid">
-          <div></div>
-          <button id="forward" class="big">▲</button>
-          <div></div>
-          <button id="left" class="big">◀</button>
-          <button id="brake" class="big">●</button>
-          <button id="right" class="big">▶</button>
-        </div>
-        <div style="display:flex;gap:8px">
-          <div class="small">Speed: <span id="speedLabel">0.0</span> m/s</div>
-        </div>
-      </div>
-    </div>
-  </div>
+  <script>
+    const startBtn = document.getElementById("startBtn");
+    const carContainer = document.getElementById("carContainer");
 
-  <!-- snapshot preview -->
-  <div id="preview">
-    <div style="text-align:center">
-      <img id="snapImg" src="" alt="snapshot"/>
-      <div class="row">
-        <button onclick="closePreview()" style="padding:10px 14px;border-radius:10px;background:var(--accent);border:none;font-weight:700">Close</button>
-        <a id="downloadSnap" style="text-decoration:none"><button style="padding:10px 14px;border-radius:10px;background:#4a90e2;border:none;font-weight:700">Download</button></a>
-      </div>
-    </div>
-  </div>
+    startBtn.addEventListener("click", () => {
+      carContainer.setAttribute("visible", "true");
 
-  <script type="module">
-  import * as THREE from 'https://unpkg.com/three@0.160.0/build/three.module.js';
-  import { DeviceOrientationControls } from 'https://unpkg.com/three@0.160.0/examples/jsm/controls/DeviceOrientationControls.js';
+      // Place car on floor level
+      carContainer.setAttribute("position", { x: 0, y: 0, z: -3 });
 
-  // DOM
-  const video = document.getElementById('camera');
-  const canvas = document.getElementById('gl');
-  const startBtn = document.getElementById('start');
-  const hint = document.getElementById('hint');
-  const status = document.getElementById('camState');
-  const preview = document.getElementById('preview');
-  const snapImg = document.getElementById('snapImg');
-  const downloadSnap = document.getElementById('downloadSnap');
-
-  // controls
-  const btnForward = document.getElementById('forward');
-  const btnBrake = document.getElementById('brake');
-  const btnLeft = document.getElementById('left');
-  const btnRight = document.getElementById('right');
-  const btnSwitch = document.getElementById('switch');
-  const btnSnapshot = document.getElementById('snapshot');
-  const btnClear = document.getElementById('clear');
-  const colorInput = document.getElementById('carColor');
-  const speedLabel = document.getElementById('speedLabel');
-
-  // Camera handling variables
-  let currentStream = null;
-  let deviceIds = [];
-  let deviceIndex = 0;
-  let useRear = true;
-
-  async function getDevices(){
-    try{
-      const list = await navigator.mediaDevices.enumerateDevices();
-      deviceIds = list.filter(d=>d.kind==='videoinput').map(d=>d.deviceId);
-    }catch(e){ console.warn('enumerateDevices failed', e); }
-  }
-
-  async function startCamera(){
-    status.textContent = 'starting...';
-    if(currentStream){ currentStream.getTracks().forEach(t=>t.stop()); currentStream=null; }
-    // Choose constraints. prefer deviceId if available
-    let constraints = { video: { facingMode: useRear ? 'environment' : 'user' }, audio:false };
-    if(deviceIds.length){
-      // try to use deviceId if exist (helps some Android devices)
-      constraints.video = { deviceId: { exact: deviceIds[deviceIndex % deviceIds.length] } };
-    }
-    try{
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
-      currentStream = stream;
-      video.srcObject = stream;
-      // mirror when front camera
-      video.style.transform = useRear ? 'scaleX(1)' : 'scaleX(-1)';
-      status.textContent = 'running';
-      await video.play();
-      // resize once metadata available
-      video.onloadedmetadata = () => { onResize(); };
-    }catch(err){
-      console.error('getUserMedia failed', err);
-      status.textContent = 'error';
-      hint.textContent = 'Camera permission or device error. ' + (err && err.message ? err.message : '');
-      // fallback: try basic facingMode if deviceId exact failed
-      if(err.name === 'OverconstrainedError' && !deviceIds.length){
-        try{ const stream = await navigator.mediaDevices.getUserMedia({video:true}); currentStream=stream; video.srcObject=stream; await video.play(); }catch(e){ console.error(e); }
-      }
-    }
-  }
-
-  btnSwitch.addEventListener('click', async ()=>{ useRear = !useRear; // cycle deviceIndex if many cameras
-    deviceIndex = (deviceIndex+1)%(deviceIds.length || 1);
-    await startCamera();
-  });
-
-  // Snapshot
-  btnSnapshot.addEventListener('click', ()=>{
-    const w = canvas.width, h = canvas.height;
-    const tmp = document.createElement('canvas'); tmp.width=w; tmp.height=h;
-    const ctx = tmp.getContext('2d');
-    // draw camera video (may be mirrored). To respect transform we draw video normally; user-facing mirror is cosmetic.
-    ctx.drawImage(video, 0, 0, w, h);
-    // draw 3D overlay
-    ctx.drawImage(renderer.domElement, 0, 0, w, h);
-    const dataUrl = tmp.toDataURL('image/png');
-    snapImg.src = dataUrl;
-    downloadSnap.href = dataUrl;
-    downloadSnap.download = 'ar-car.png';
-    preview.style.display = 'grid';
-  });
-
-  function closePreview(){ preview.style.display='none'; }
-  window.closePreview = closePreview;
-
-  btnClear.addEventListener('click', ()=>{
-    // remove car if exists
-    if(carGroup){ scene.remove(carGroup); carGroup = null; }
-    hint.textContent = 'Cleared car.';
-  });
-
-  // ---------- three.js scene ----------
-  const renderer = new THREE.WebGLRenderer({ canvas, antialias:true, alpha:true, preserveDrawingBuffer:true });
-  renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
-  const scene = new THREE.Scene();
-  const camera3D = new THREE.PerspectiveCamera(60, 1, 0.01, 200);
-  const controls = new DeviceOrientationControls(camera3D);
-
-  // lighting
-  scene.add(new THREE.HemisphereLight(0xffffff,0x444444,0.9));
-  const dl = new THREE.DirectionalLight(0xffffff,0.9); dl.position.set(1,2,1); scene.add(dl);
-
-  // faint ground grid for depth cue
-  const grid = new THREE.GridHelper(20, 40, 0x88aaff, 0x334455);
-  grid.material.opacity = 0.08; grid.material.transparent = true; grid.position.y = -1.2;
-  scene.add(grid);
-
-  // car holder
-  let carGroup = null;
-
-  // create a simple stylized car from boxes
-  function buildCar(colorHex='#ff6b6b'){
-    const g = new THREE.Group();
-    const bodyMat = new THREE.MeshStandardMaterial({ color: colorHex, roughness:.4, metalness:.2 });
-    const wheelMat = new THREE.MeshStandardMaterial({ color:0x111111, roughness:.6, metalness:0.2 });
-    // body
-    const body = new THREE.Mesh(new THREE.BoxGeometry(0.9,0.25,0.4), bodyMat);
-    body.position.y = 0.18;
-    g.add(body);
-    const cabin = new THREE.Mesh(new THREE.BoxGeometry(0.5,0.2,0.35), new THREE.MeshStandardMaterial({ color:0xffffff, roughness:.7 }));
-    cabin.position.set(-0.05,0.32,0);
-    g.add(cabin);
-    // wheels
-    const positions = [[0.33,0.05,0.19],[ -0.33,0.05,0.19 ],[0.33,0.05,-0.19],[-0.33,0.05,-0.19]];
-    positions.forEach(p=>{
-      const w = new THREE.Mesh(new THREE.CylinderGeometry(0.06,0.06,0.04,16), wheelMat);
-      w.rotation.z = Math.PI/2;
-      w.position.set(...p);
-      g.add(w);
-    });
-    // small front bumper
-    const bumper = new THREE.Mesh(new THREE.BoxGeometry(0.18,0.08,0.38), new THREE.MeshStandardMaterial({ color:0x222222 }));
-    bumper.position.set(0.45,0.17,0);
-    g.add(bumper);
-    // scale for nicer size
-    g.scale.set(1.2,1.2,1.2);
-    g.rotation.order = 'YXZ';
-    return g;
-  }
-
-  // Place car at camera forward ~2 meters on tap
-  canvas.addEventListener('pointerdown', (e)=>{
-    // if car missing, place; if exists and user taps on UI, ignore.
-    if(e.target !== canvas) return;
-    // instantiate if not exist
-    if(!carGroup){
-      carGroup = buildCar(colorInput.value);
-      // set initial position 2m ahead of camera
-      const forward = new THREE.Vector3(0,0,-1).applyQuaternion(camera3D.quaternion);
-      const pos = camera3D.position.clone().add(forward.multiplyScalar(2.0));
-      carGroup.position.copy(pos);
-      // face camera (so front points away from camera)
-      const lookAtPos = camera3D.position.clone();
-      lookAtPos.y = carGroup.position.y; // keep level
-      carGroup.lookAt(lookAtPos);
-      scene.add(carGroup);
-      // initialize physics state
-      carState.position = carGroup.position.clone();
-      carState.rotationY = carGroup.rotation.y;
-      carState.velocity.set(0,0,0);
-      hint.textContent = 'Car placed. Use controls to drive.';
-    }else{
-      hint.textContent = 'Car already placed. Use controls or Clear.';
-    }
-  });
-
-  // Update car color when changed
-  colorInput.addEventListener('input', ()=>{
-    if(carGroup){
-      carGroup.traverse(mesh=>{
-        if(mesh.isMesh && mesh.material && mesh.material.color) mesh.material.color.set(colorInput.value);
+      // Optional: slow spin for realism
+      carContainer.setAttribute("animation", {
+        property: "rotation",
+        to: "0 360 0",
+        loop: true,
+        dur: 10000,
+        easing: "linear"
       });
-    }
-  });
 
-  // ---------- simple car physics ----------
-  const carState = {
-    velocity: new THREE.Vector3(0,0,0), // world-space velocity
-    acceleration: 0,
-    rotationY: 0,
-    position: new THREE.Vector3(),
-    throttle: 0, // -1..1
-    steer: 0 // -1..1
-  };
-
-  // controller flags for continuous input
-  const input = { forward:false, back:false, left:false, right:false };
-
-  // button events: press & release for smooth control
-  function bindHold(btn, name){
-    btn.addEventListener('pointerdown', e=>{ e.preventDefault(); input[name]=true; });
-    window.addEventListener('pointerup', ()=>{ input[name]=false; });
-    btn.addEventListener('pointercancel', ()=>{ input[name]=false; });
-    // support touchend for some browsers
-    btn.addEventListener('touchend', ()=>{ input[name]=false; });
-  }
-  bindHold(btnForward,'forward');
-  bindHold(btnBrake,'back');
-  bindHold(btnLeft,'left');
-  bindHold(btnRight,'right');
-
-  // physics constants (tweak for feel)
-  const MAX_SPEED = 3.5; // m/s
-  const ACCEL = 6.0; // m/s^2
-  const BRAKE_DECAY = 6.0;
-  const STEER_ANGLE = 1.2; // radians max
-  const STEER_SPEED = 2.8; // how fast steering changes
-  const DAMPING = 1.6; // velocity damping
-
-  // animate loop
-  let last = performance.now();
-  function animate(now=0){
-    const dt = Math.min(0.05, (now - last)/1000);
-    last = now;
-
-    // update device orientation controls (rotates camera3D)
-    controls.update();
-
-    // update car control input
-    carState.throttle = (input.forward ? 1 : 0) + (input.back ? -1 : 0); // -1..1
-    // steering target -1..1
-    const steerTarget = (input.left ? -1 : 0) + (input.right ? 1 : 0);
-    // smooth steering
-    carState.steer = THREE.MathUtils.lerp(carState.steer, steerTarget, Math.min(1, STEER_SPEED * dt));
-
-    // physics integration
-    if(carGroup){
-      // forward vector in world space (car local -Z)
-      const forward = new THREE.Vector3(0,0,-1).applyQuaternion(carGroup.quaternion).setY(0).normalize();
-
-      // acceleration along forward
-      if(carState.throttle > 0){
-        // accelerate forward
-        const a = forward.clone().multiplyScalar(ACCEL * carState.throttle * dt);
-        carState.velocity.add(a);
-      }else if(carState.throttle < 0){
-        // brake / reverse
-        const a = forward.clone().multiplyScalar(ACCEL * carState.throttle * dt);
-        carState.velocity.add(a);
-      }else{
-        // natural damping
-        carState.velocity.multiplyScalar(Math.max(0, 1 - DAMPING * dt * 0.2));
-      }
-
-      // apply braking stronger when brake pressed
-      if(input.back && carState.velocity.length() > 0){
-        // stronger deceleration
-        carState.velocity.multiplyScalar(Math.max(0, 1 - BRAKE_DECAY * dt * 0.5));
-      }
-
-      // clamp speed
-      const speed = carState.velocity.length();
-      if(speed > MAX_SPEED){
-        carState.velocity.setLength(MAX_SPEED);
-      }
-
-      // steering modifies orientation based on speed sign and steer input
-      const turn = carState.steer * STEER_ANGLE * (speed / Math.max(0.1, MAX_SPEED));
-      // rotate smoothly
-      carGroup.rotation.y += turn * dt * 0.9; // tune factor for smoothness
-
-      // integrate position
-      carGroup.position.add(carState.velocity.clone().multiplyScalar(dt));
-
-      // slight tilt during turn for a nicer look
-      const tilt = THREE.MathUtils.lerp(carGroup.rotation.x, -turn*0.12, 0.08);
-      carGroup.rotation.x = tilt;
-
-      // update carState copies for debugging / labels
-      carState.position.copy(carGroup.position);
-      carState.rotationY = carGroup.rotation.y;
-
-      speedLabel.textContent = carState.velocity.length().toFixed(2);
-    }
-
-    // render
-    renderer.render(scene, camera3D);
-    requestAnimationFrame(animate);
-  }
-
-  // window resize handler sets canvas size & camera aspect
-  function onResize(){
-    const w = canvas.clientWidth || window.innerWidth;
-    const h = canvas.clientHeight || window.innerHeight;
-    if(canvas.width !== w || canvas.height !== h){
-      canvas.width = w; canvas.height = h;
-      renderer.setSize(w,h,false);
-      camera3D.aspect = w/h;
-      camera3D.updateProjectionMatrix();
-    }
-  }
-  window.addEventListener('resize', onResize);
-
-  // initial camera setup & permissions
-  async function requestMotionPermission(){
-    try{
-      if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
-        const resp = await DeviceOrientationEvent.requestPermission();
-        if(resp !== 'granted') console.warn('Device motion permission not granted:', resp);
-      }
-    }catch(e){ console.warn('motion request error', e); }
-  }
-
-  // Start button flow
-  startBtn.addEventListener('click', async ()=>{
-    document.getElementById('enter').style.display = 'none';
-    hint.textContent = 'Requesting permissions...';
-    await requestMotionPermission();
-    await getDevices();
-    await startCamera();
-    // center camera3D at origin (device orientation controls only rotate it, not move)
-    camera3D.position.set(0,0,0.0);
-    // position the virtual scene a little (camera will feel like device)
-    // start renderer
-    onResize();
-    renderer.setClearAlpha(0);
-    // begin animation loop
-    last = performance.now();
-    animate(last);
-    hint.textContent = 'Tap screen to place car ~2m ahead.';
-  });
-
-  // auto-start attempt on load for convenience (but user will still press Start)
-  // navigator.permissions can be used to check but mobile browsers often require gesture.
-
-  // try to keep frameRate adaptive for perf (cap pixelRatio on slow devices)
-  // Already set at creation.
-
-  // ensure canvas covers whole viewport
-  onResize();
-
-  // end module
+      startBtn.style.display = "none"; // Hide button after starting
+    });
   </script>
 </body>
 </html>
