@@ -3,30 +3,38 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>Universal AR Camera</title>
+  <title>Smooth AR Camera</title>
   <style>
-    :root { --fg:#eef5ff; --muted:#93a6ba; --accent:#4ade80; }
+    :root { --fg:#f0f6ff; --muted:#9aaac3; --accent:#4ade80; --bg:rgba(20,26,32,.6); }
     *{ box-sizing:border-box; }
     html,body { height:100%; margin:0; font-family: system-ui, sans-serif; color:var(--fg); background:#000; }
     #wrap { position:fixed; inset:0; overflow:hidden; }
     #camera { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
     #gl { position:absolute; inset:0; width:100%; height:100%; pointer-events:auto; }
 
-    /* UI Layout */
-    #ui { position:fixed; bottom:0; left:0; right:0; padding:12px; display:flex; justify-content:space-between; gap:.5rem; pointer-events:none; }
-    .panel { pointer-events:auto; backdrop-filter: blur(12px); background: rgba(12,18,24,.55); border:1px solid rgba(255,255,255,.2); border-radius: 14px; padding: .5rem; display:flex; gap:.5rem }
-    button, .pill { border:1px solid rgba(255,255,255,.25); background: rgba(20,26,32,.7); color:var(--fg); padding:.55rem .9rem; border-radius:999px; font-weight:600; font-size:.9rem; cursor:pointer; transition:.2s; }
-    button:hover { background:rgba(255,255,255,.15); }
+    /* UI */
+    #ui { position:fixed; bottom:0; left:0; right:0; padding:14px; display:flex; justify-content:space-between; gap:.6rem; pointer-events:none; transition:.3s; }
+    .panel { pointer-events:auto; backdrop-filter: blur(12px); background: var(--bg); border:1px solid rgba(255,255,255,.15); border-radius: 14px; padding:.5rem; display:flex; gap:.5rem; align-items:center; box-shadow:0 6px 14px rgba(0,0,0,.4); }
+    button, .pill { border:none; background: rgba(255,255,255,.1); color:var(--fg); padding:.6rem .9rem; border-radius:12px; font-weight:600; font-size:.9rem; cursor:pointer; transition:.25s; display:flex; align-items:center; justify-content:center; gap:.4rem; }
+    button:hover { background:rgba(255,255,255,.25); }
     button.active { background: var(--accent); color:#000; }
-    .pill input[type="color"]{ appearance:none; width:28px; height:28px; border:none; padding:0; cursor:pointer; }
+    .pill input[type="color"]{ appearance:none; width:28px; height:28px; border-radius:50%; border:none; padding:0; cursor:pointer; }
 
     /* Start Screen */
-    #enter { position: fixed; inset:0; display:grid; place-items:center; gap:.75rem; background:#000; z-index: 10; }
-    #enter button { font-size:1rem; padding:.9rem 1.4rem; background:var(--accent); color:#000; border:none; border-radius:12px; }
+    #enter { position: fixed; inset:0; display:grid; place-items:center; gap:.9rem; background:#000; z-index:10; animation:fadeIn .8s ease-out; }
+    #enter button { font-size:1.1rem; padding:.9rem 1.5rem; background:var(--accent); color:#000; border:none; border-radius:14px; font-weight:700; }
     #enter small { color:#9fb3c9; max-width:22rem; text-align:center; line-height:1.4; }
 
     /* Hint */
-    .hint { position:fixed; top:0; left:0; right:0; text-align:center; padding:.7rem; color:var(--muted); pointer-events:none; background: linear-gradient(180deg, rgba(0,0,0,.6), transparent); font-size:.9rem; }
+    .hint { position:fixed; top:0; left:0; right:0; text-align:center; padding:.7rem; color:var(--muted); pointer-events:none; background: linear-gradient(180deg, rgba(0,0,0,.7), transparent); font-size:.9rem; opacity:0; transition:.6s; }
+    .hint.show { opacity:1; }
+
+    /* Snapshot preview */
+    #preview { position:fixed; inset:0; display:none; place-items:center; background:rgba(0,0,0,.8); z-index:20; }
+    #preview img { max-width:90%; max-height:90%; border-radius:12px; box-shadow:0 8px 20px rgba(0,0,0,.7); }
+    #preview button { margin-top:1rem; padding:.6rem 1.2rem; border:none; background:var(--accent); color:#000; border-radius:10px; font-weight:700; cursor:pointer; }
+
+    @keyframes fadeIn { from{opacity:0;} to{opacity:1;} }
   </style>
 </head>
 <body>
@@ -35,24 +43,35 @@
     <canvas id="gl"></canvas>
   </div>
 
+  <!-- Start Screen -->
   <div id="enter">
     <button id="start">▶ Start AR Camera</button>
-    <small>This is <b>simulated markerless AR</b>. Works on most phones without ARCore/ARKit. Objects float in space and follow device orientation.</small>
+    <small>Simulated markerless AR. No ARCore/ARKit required. Objects float in space and follow orientation.</small>
   </div>
 
-  <div class="hint" id="hint">Tap ▶ Start and allow camera & motion permissions.</div>
+  <!-- Hint -->
+  <div class="hint" id="hint">Tap ▶ Start and allow permissions.</div>
 
+  <!-- Controls -->
   <div id="ui">
     <div class="panel">
-      <button id="shape-cube" class="active">Cube</button>
-      <button id="shape-sphere">Sphere</button>
-      <button id="shape-cylinder">Cylinder</button>
-      <label class="pill">Color <input id="color" type="color" value="#4ade80"></label>
+      <button id="shape-cube" class="active">⬛</button>
+      <button id="shape-sphere">⚪</button>
+      <button id="shape-cylinder">🟪</button>
+      <label class="pill">🎨 <input id="color" type="color" value="#4ade80"></label>
     </div>
     <div class="panel">
-      <button id="switch">Switch</button>
-      <button id="clear">Clear</button>
+      <button id="switch">🔄</button>
+      <button id="clear">🗑</button>
       <button id="snapshot">📸</button>
+    </div>
+  </div>
+
+  <!-- Snapshot Preview -->
+  <div id="preview">
+    <div style="display:flex;flex-direction:column;align-items:center;">
+      <img id="snapImg" src="" alt="Snapshot"/>
+      <button onclick="document.getElementById('preview').style.display='none'">Close</button>
     </div>
   </div>
 
@@ -60,26 +79,27 @@
     import * as THREE from 'https://unpkg.com/three@0.160.0/build/three.module.js';
     import { DeviceOrientationControls } from 'https://unpkg.com/three@0.160.0/examples/jsm/controls/DeviceOrientationControls.js';
 
-    // DOM
     const video = document.getElementById('camera');
     const canvas = document.getElementById('gl');
     const startBtn = document.getElementById('start');
     const hint = document.getElementById('hint');
     const colorInput = document.getElementById('color');
+    const preview = document.getElementById('preview');
+    const snapImg = document.getElementById('snapImg');
+
     const shapeBtns = {
       cube: document.getElementById('shape-cube'),
       sphere: document.getElementById('shape-sphere'),
       cylinder: document.getElementById('shape-cylinder')
     };
 
-    // Shape selection
     let currentShape = 'cube';
     function setShape(s){ currentShape=s; Object.entries(shapeBtns).forEach(([k,b])=>b.classList.toggle('active',k===s)); }
     shapeBtns.cube.onclick = ()=>setShape('cube');
     shapeBtns.sphere.onclick = ()=>setShape('sphere');
     shapeBtns.cylinder.onclick = ()=>setShape('cylinder');
 
-    // Scene setup
+    // Scene
     const renderer = new THREE.WebGLRenderer({ canvas, antialias:true, alpha:true, preserveDrawingBuffer:true });
     renderer.setPixelRatio(Math.min(2, window.devicePixelRatio||1));
     const scene = new THREE.Scene();
@@ -99,7 +119,7 @@
       block.position.copy(camera3D.position.clone().add(dir.multiplyScalar(dist)));
       block.lookAt(camera3D.position);
       scene.add(block); placed.push(block);
-      hint.textContent = 'Block placed. Use two-finger rotate / pinch to scale.';
+      showHint("Block placed. Pinch to scale, two-finger rotate.");
     });
 
     function makeBlock(shape, hex){
@@ -116,7 +136,7 @@
     document.getElementById('clear').onclick = ()=>{
       placed.forEach(m => { scene.remove(m); m.geometry.dispose(); m.material.dispose(); });
       placed.length = 0;
-      hint.textContent = 'Scene cleared.';
+      showHint("Scene cleared.");
     };
 
     // Snapshot
@@ -125,12 +145,12 @@
       const ctx = snap.getContext('2d');
       ctx.drawImage(video, 0, 0, snap.width, snap.height);
       ctx.drawImage(canvas, 0, 0, snap.width, snap.height);
-      const url = snap.toDataURL('image/png');
-      const a = document.createElement('a'); a.href = url; a.download = 'ar-snapshot.png'; a.click();
-      hint.textContent = 'Snapshot saved!';
+      snapImg.src = snap.toDataURL('image/png');
+      preview.style.display="grid";
+      showHint("Snapshot taken!");
     };
 
-    // Camera handling
+    // Camera
     let currentStream = null; let deviceIds = []; let deviceIndex = 0;
     async function getDevices(){
       const devices = await navigator.mediaDevices.enumerateDevices();
@@ -139,12 +159,10 @@
     async function startCamera(){
       if(currentStream){ currentStream.getTracks().forEach(t=>t.stop()); }
       let constraints = { video: { facingMode: 'environment' } };
-      if(deviceIds.length){
-        constraints = { video: { deviceId: { exact: deviceIds[deviceIndex % deviceIds.length] } } };
-      }
+      if(deviceIds.length){ constraints = { video: { deviceId: { exact: deviceIds[deviceIndex % deviceIds.length] } } }; }
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
       currentStream = stream; video.srcObject = stream;
-      await video.play().catch(e=>console.warn("Video play failed:", e));
+      await video.play().catch(e=>console.warn("Play failed:", e));
       resize();
     }
     document.getElementById('switch').onclick = async ()=>{ if(deviceIds.length>1){ deviceIndex=(deviceIndex+1)%deviceIds.length; await startCamera(); } };
@@ -161,6 +179,9 @@
     // Animate
     function animate(){ controls.update(); renderer.render(scene, camera3D); requestAnimationFrame(animate); }
 
+    // Hints
+    function showHint(msg){ hint.textContent=msg; hint.classList.add("show"); setTimeout(()=>hint.classList.remove("show"), 2500); }
+
     // Start
     startBtn.addEventListener('click', async ()=>{
       document.getElementById('enter').style.display='none';
@@ -171,10 +192,10 @@
         await getDevices();
         await startCamera();
         resize(); animate();
-        hint.textContent = 'Tap screen to place objects ~2m ahead.';
+        showHint("Tap screen to place objects ~2m ahead.");
       }catch(err){
         console.error("Start error:", err);
-        hint.textContent = 'Camera start failed: ' + err.message;
+        showHint("Camera failed: " + err.message);
         document.getElementById('enter').style.display='grid';
         startBtn.textContent = 'Retry';
       }
