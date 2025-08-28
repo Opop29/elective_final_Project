@@ -1,193 +1,180 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-<title>AR Car — Markerless</title>
-<style>
-  :root { --fg:#e9f6ff; --muted:#9db0c6; --accent:#4ade80; --bg:rgba(8,12,18,.6); }
-  html,body{height:100%;margin:0;background:#000;color:var(--fg);font-family:system-ui,Segoe UI,Roboto,Arial;}
-  #wrap{position:fixed;inset:0;overflow:hidden}
-  video#camera{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:#000;z-index:0}
-  canvas#gl{position:absolute;inset:0;width:100%;height:100%;z-index:1;touch-action:none}
-  #enter{position:fixed;inset:0;display:grid;place-items:center;gap:.6rem;z-index:30;background:linear-gradient(180deg,rgba(0,0,0,.6),transparent)}
-  #enter button{padding:12px 18px;border-radius:12px;border:none;background:var(--accent);color:#032;font-weight:700;font-size:16px}
-  .hint{position:fixed;top:10px;left:0;right:0;text-align:center;color:var(--muted);z-index:30}
-  #rotateOverlay{position:fixed;inset:0;background:#000;color:#fff;display:flex;align-items:center;justify-content:center;font-size:20px;z-index:60}
-  @media (orientation:landscape){ #rotateOverlay{display:none} }
-  #ui {position:fixed;left:12px;right:12px;bottom:12px;display:flex;justify-content:space-between;gap:10px;z-index:40;pointer-events:none}
-  .panel{pointer-events:auto;backdrop-filter:blur(8px);background:var(--bg);border-radius:12px;padding:8px;display:flex;gap:8px;align-items:center;border:1px solid rgba(255,255,255,.06)}
-  button.control{border:none;background:rgba(255,255,255,.06);color:var(--fg);padding:10px 14px;border-radius:10px;font-weight:700;cursor:pointer}
-  button.control:active{transform:translateY(1px)}
-  .big{width:64px;height:48px;font-size:18px}
-  input[type=color]{width:36px;height:36px;border-radius:8px;border:0;padding:0}
-  #preview{position:fixed;inset:0;display:none;place-items:center;background:rgba(0,0,0,.85);z-index:70}
-  #preview img{max-width:92%;max-height:86%;border-radius:12px;box-shadow:0 12px 40px rgba(0,0,0,.6)}
-  #status{position:fixed;left:12px;top:12px;padding:8px 10px;border-radius:10px;background:rgba(0,0,0,.45);font-size:13px;color:var(--muted);z-index:40}
-</style>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <title>AR — Floating Cube</title>
+  <style>
+    html,body { height:100%; margin:0; font-family:system-ui,Segoe UI,Roboto,Arial; background:#111; color:#eee; }
+    #ui {
+      position: absolute;
+      left: 12px;
+      top: 12px;
+      z-index: 10;
+      display:flex;
+      gap:10px;
+      align-items:center;
+      pointer-events: none;
+    }
+    .panel {
+      background: rgba(0,0,0,0.5);
+      padding:8px 10px;
+      border-radius:10px;
+      backdrop-filter: blur(6px);
+      pointer-events: auto;
+    }
+    #msg { font-size:0.9rem; opacity:0.95; }
+    canvas { display:block; width:100%; height:100%; }
+    .hint { font-size:0.85rem; color:#bcd; margin-top:6px; }
+  </style>
 </head>
 <body>
-  <div id="wrap">
-    <video id="camera" playsinline autoplay muted></video>
-    <canvas id="gl"></canvas>
-  </div>
-
-  <div id="enter">
-    <button id="start">▶ Start AR Car</button>
-    <div style="color:var(--muted);max-width:72ch;text-align:center">Landscape recommended. Tap the screen to place the car on the floor. Hold controls to drive; pinch to scale the car.</div>
-  </div>
-
-  <div id="rotateOverlay">Please rotate your device to <b>landscape</b></div>
-  <div class="hint" id="hint">Allow camera & motion permissions, then tap Start.</div>
-  <div id="status">Camera: <span id="camState">idle</span></div>
-
   <div id="ui">
-    <div class="panel">
-      <button id="snapshot" class="control">📸</button>
-      <button id="clear" class="control">🧹</button>
-      <label style="display:flex;align-items:center;gap:8px;color:var(--muted)"><span>Color</span><input id="carColor" type="color" value="#ff6b6b"></label>
-    </div>
-    <div class="panel">
-      <div style="display:flex;flex-direction:column;align-items:center;gap:8px">
-        <div style="display:grid;grid-template-columns:repeat(3,64px);gap:8px">
-          <div></div>
-          <button id="forward" class="control big">▲</button>
-          <div></div>
-          <button id="left" class="control big">◀</button>
-          <button id="brake" class="control big">●</button>
-          <button id="right" class="control big">▶</button>
-        </div>
-        <div style="color:var(--muted);font-size:13px">Speed: <span id="speedLabel">0.00</span> m/s</div>
-      </div>
+    <div class="panel" id="msg">Tap <strong>Start AR</strong>, then tap the screen to place the floating cube.</div>
+  </div>
+
+  <!-- three.js + ARButton (module versions) -->
+  <script type="module">
+    import * as THREE from 'https://unpkg.com/three@0.152.2/build/three.module.js';
+    import { ARButton } from 'https://unpkg.com/three@0.152.2/examples/jsm/webxr/ARButton.js';
+
+    let camera, scene, renderer;
+    let controller;
+    let reticle = null;
+    let hitTestSource = null;
+    let localReferenceSpace = null;
+    const floatingCubes = []; // placed cubes
+
+    init();
+    animate();
+
+    function init() {
+      // renderer
+      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+      renderer.setPixelRatio(window.devicePixelRatio);
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.xr.enabled = true;
+      document.body.appendChild(renderer.domElement);
+
+      // scene + camera
+      scene = new THREE.Scene();
+      camera = new THREE.PerspectiveCamera();
+
+      // light
+      const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1.0);
+      scene.add(light);
+
+      // reticle: a ring that appears where a surface is found
+      const ringGeo = new THREE.RingGeometry(0.08, 0.12, 32).rotateX(-Math.PI / 2);
+      const ringMat = new THREE.MeshBasicMaterial({ color: 0x00ffcc, opacity: 0.9, transparent: true });
+      reticle = new THREE.Mesh(ringGeo, ringMat);
+      reticle.matrixAutoUpdate = false;
+      reticle.visible = false;
+      scene.add(reticle);
+
+      // controller to receive select events (user taps)
+      controller = renderer.xr.getController(0);
+      controller.addEventListener('select', onSelect);
+      scene.add(controller);
+
+      // AR button with required hit-test feature
+      document.body.appendChild(ARButton.createButton(renderer, { requiredFeatures: ['hit-test'] }));
+
+      // when session starts, request hit-test source
+      renderer.xr.addEventListener('sessionstart', async () => {
+        const session = renderer.xr.getSession();
+        // Reference space for rendering
+        localReferenceSpace = await session.requestReferenceSpace('local');
+        // create a viewer reference space then request hit test source
+        const viewerSpace = await session.requestReferenceSpace('viewer');
+        hitTestSource = await session.requestHitTestSource({ space: viewerSpace });
+
+        // cleanup on end
+        session.addEventListener('end', () => {
+          hitTestSource = null;
+          localReferenceSpace = null;
+        });
+      });
+
+      window.addEventListener('resize', onWindowResize);
+    }
+
+    function onWindowResize() {
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    // Called when user taps (select) — place a floating cube at reticle position
+    function onSelect() {
+      if (!reticle.visible) return; // no surface found yet
+
+      // create a box and place it slightly above the reticle so it appears to float
+      const size = 0.12 + Math.random() * 0.08;
+      const geometry = new THREE.BoxGeometry(size, size, size);
+      // simple material with a slightly glossy look
+      const material = new THREE.MeshStandardMaterial({ color: new THREE.Color(`hsl(${Math.floor(Math.random()*360)}, 70%, 55%)`), roughness: 0.3, metalness: 0.1 });
+      const cube = new THREE.Mesh(geometry, material);
+
+      // set position from reticle's world matrix
+      const matrix = new THREE.Matrix4();
+      matrix.copy(reticle.matrix);
+      const position = new THREE.Vector3();
+      const quaternion = new THREE.Quaternion();
+      const scale = new THREE.Vector3();
+      matrix.decompose(position, quaternion, scale);
+
+      // lift slightly so cube doesn't clip into ground
+      cube.position.copy(position);
+      cube.position.y += size * 0.6 + 0.02;
+
+      // random rotation for variety
+      cube.rotation.y = Math.random() * Math.PI * 2;
+
+      // add a small floating data container for animation
+      floatingCubes.push({ mesh: cube, startY: cube.position.y, speed: 1 + Math.random() * 0.7, amplitude: 0.02 + Math.random() * 0.03 });
+
+      scene.add(cube);
+    }
+
+    // animation loop
+    function animate() {
+      renderer.setAnimationLoop(render);
+    }
+
+    // Render tick: perform hit test and animate floating cubes
+    function render(timestamp, frame) {
+      // handle hit-test: need frame & hitTestSource
+      if (frame && hitTestSource && localReferenceSpace) {
+        const referenceSpace = localReferenceSpace;
+        const hitTestResults = frame.getHitTestResults(hitTestSource);
+        if (hitTestResults.length > 0) {
+          const hit = hitTestResults[0];
+          const pose = hit.getPose(referenceSpace);
+          // apply transform to reticle
+          reticle.visible = true;
+          reticle.matrix.fromArray(pose.transform.matrix);
+        } else {
+          reticle.visible = false;
+        }
+      }
+
+      // animate floating cubes (simple sine up/down)
+      const t = performance.now() / 1000;
+      for (const obj of floatingCubes) {
+        obj.mesh.position.y = obj.startY + Math.sin(t * obj.speed) * obj.amplitude;
+        obj.mesh.rotation.y += 0.01; // gentle rotation
+      }
+
+      renderer.render(scene, camera);
+    }
+
+  </script>
+
+  <div style="position:fixed; bottom:12px; left:12px; z-index:12; color:#dfe">
+    <div style="background:rgba(0,0,0,0.45); padding:8px 10px; border-radius:10px; font-size:0.9rem;">
+      <div><strong>Usage:</strong></div>
+      <div class="hint">1) Open on a compatible mobile browser (Chrome Android). 2) Allow camera access. 3) Tap the <em>Start AR</em> button. 4) Move device to scan surfaces until ring appears. 5) Tap the screen to place a floating cube.</div>
     </div>
   </div>
 
-  <div id="preview">
-    <div style="text-align:center">
-      <img id="snapImg" src="" alt="snapshot"/>
-      <div style="margin-top:12px;display:flex;gap:8px;justify-content:center">
-        <button onclick="closePreview()" class="control" style="background:var(--accent);color:#002">Close</button>
-        <a id="downloadSnap" download="ar-car.png"><button class="control" style="background:#4a90e2">Download</button></a>
-      </div>
-    </div>
-  </div>
-
-<script type="module">
-import * as THREE from 'https://unpkg.com/three@0.160.0/build/three.module.js';
-import { DeviceOrientationControls } from 'https://unpkg.com/three@0.160.0/examples/jsm/controls/DeviceOrientationControls.js';
-
-// DOM
-const video = document.getElementById('camera');
-const canvas = document.getElementById('gl');
-const startBtn = document.getElementById('start');
-const hint = document.getElementById('hint');
-const status = document.getElementById('camState');
-const snapImg = document.getElementById('snapImg');
-const preview = document.getElementById('preview');
-const downloadSnap = document.getElementById('downloadSnap');
-const btnSnapshot = document.getElementById('snapshot');
-const btnClear = document.getElementById('clear');
-const colorInput = document.getElementById('carColor');
-const btnForward = document.getElementById('forward');
-const btnBack = document.getElementById('brake');
-const btnLeft = document.getElementById('left');
-const btnRight = document.getElementById('right');
-const speedLabel = document.getElementById('speedLabel');
-
-let currentStream = null;
-
-// start rear camera only
-async function startCamera(){
-  status.textContent='starting';
-  if(currentStream){ currentStream.getTracks().forEach(t=>t.stop()); }
-  try{
-    currentStream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:'environment' }, audio:false });
-    video.srcObject = currentStream;
-    await video.play();
-    status.textContent='running';
-  }catch(err){
-    status.textContent='error';
-    hint.textContent='Camera error: '+(err.message||err);
-  }
-}
-
-// Snapshot
-btnSnapshot.addEventListener('click', ()=>{
-  const w = canvas.width, h = canvas.height;
-  const tmp = document.createElement('canvas'); tmp.width=w; tmp.height=h;
-  const ctx = tmp.getContext('2d');
-  ctx.drawImage(video,0,0,w,h);
-  ctx.drawImage(renderer.domElement,0,0,w,h);
-  const url = tmp.toDataURL('image/png');
-  snapImg.src=url; downloadSnap.href=url; preview.style.display='grid';
-});
-window.closePreview=()=>preview.style.display='none';
-btnClear.addEventListener('click', ()=>{ if(carGroup){ scene.remove(carGroup); carGroup=null; } hint.textContent='Cleared car.'; });
-
-// Three.js
-const renderer=new THREE.WebGLRenderer({canvas,antialias:true,alpha:true,preserveDrawingBuffer:true});
-renderer.setPixelRatio(Math.min(2,window.devicePixelRatio||1));
-const scene=new THREE.Scene();
-const camera3D=new THREE.PerspectiveCamera(60,1,0.01,200);
-const controls=new DeviceOrientationControls(camera3D);
-scene.add(new THREE.HemisphereLight(0xffffff,0x444444,0.95));
-const dl=new THREE.DirectionalLight(0xffffff,0.9);dl.position.set(1,2,1);scene.add(dl);
-const grid=new THREE.GridHelper(40,80,0x88aaff,0x334455);grid.material.opacity=0.06;grid.material.transparent=true;scene.add(grid);
-
-let carGroup=null;
-function makeCar(hex){
-  const g=new THREE.Group();
-  const body=new THREE.Mesh(new THREE.BoxGeometry(0.9,0.25,0.4), new THREE.MeshStandardMaterial({color:hex}));
-  body.position.y=0.15; g.add(body);
-  return g;
-}
-function placeCarOnFloor(){
-  if(carGroup) return;
-  carGroup=makeCar(colorInput.value);
-  carGroup.position.set(0,0,-2);
-  scene.add(carGroup);
-  carState.position.copy(carGroup.position);
-  carState.rotationY=0; carState.velocity.set(0,0,0);
-}
-canvas.addEventListener('pointerdown', e=>{ if(e.target===canvas) placeCarOnFloor(); });
-
-const carState={velocity:new THREE.Vector3(),steer:0,throttle:0,rotationY:0,position:new THREE.Vector3()};
-const input={forward:false,back:false,left:false,right:false};
-function bindHold(btn,key){btn.addEventListener('pointerdown',e=>{e.preventDefault();input[key]=true;});window.addEventListener('pointerup',()=>input[key]=false);}
-bindHold(btnForward,'forward');bindHold(btnBack,'back');bindHold(btnLeft,'left');bindHold(btnRight,'right');
-
-const MAX_SPEED=3.5,ACCEL=6.0,DAMPING=1.6,STEER_ANGLE=1.1,STEER_SPEED=3.0;
-let lastTime=performance.now();
-function animate(now=0){
-  const dt=Math.min(0.05,(now-lastTime)/1000);lastTime=now;
-  controls.update();
-  carState.throttle=(input.forward?1:0)+(input.back?-1:0);
-  if(carGroup){
-    const forward=new THREE.Vector3(0,0,-1).applyQuaternion(carGroup.quaternion).setY(0).normalize();
-    if(carState.throttle!==0) carState.velocity.add(forward.clone().multiplyScalar(ACCEL*carState.throttle*dt));
-    else carState.velocity.multiplyScalar(Math.max(0,1-DAMPING*dt*0.3));
-    if(carState.velocity.length()>MAX_SPEED) carState.velocity.setLength(MAX_SPEED);
-    carGroup.position.add(carState.velocity.clone().multiplyScalar(dt));
-    carGroup.position.y=0;
-    speedLabel.textContent=carState.velocity.length().toFixed(2);
-  }
-  renderer.render(scene,camera3D);
-  requestAnimationFrame(animate);
-}
-function onResize(){const w=canvas.clientWidth||window.innerWidth,h=canvas.clientHeight||window.innerHeight;canvas.width=w;canvas.height=h;renderer.setSize(w,h,false);camera3D.aspect=w/h;camera3D.updateProjectionMatrix();}
-window.addEventListener('resize',onResize);
-
-// Start flow
-startBtn.addEventListener('click',async()=>{
-  document.getElementById('enter').style.display='none';
-  await startCamera();
-  camera3D.position.set(0,1.6,0);
-  controls.connect();
-  onResize();
-  lastTime=performance.now();
-  animate(lastTime);
-  hint.textContent='Tap to place car.';
-});
-</script>
 </body>
 </html>
